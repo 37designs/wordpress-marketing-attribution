@@ -1,0 +1,41 @@
+# Builds the installable zip and publishes a GitHub release when a version tag is pushed.
+# Release steps: bump "Version:" and VERSION in gf-source-capture.php, commit, then
+#   git tag v2.1.0 && git push origin v2.1.0
+# Sites running the plugin see the update in WordPress within about 6 hours.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the plugin version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          HEADER=$(grep -m1 -E '^\s*\*\s*Version:' gf-source-capture.php | sed -E 's/.*Version:\s*//' | tr -d '[:space:]')
+          CONST=$(grep -m1 "const VERSION" gf-source-capture.php | sed -E "s/.*'([^']+)'.*/\1/")
+          echo "tag=$TAG header=$HEADER const=$CONST"
+          if [ "$TAG" != "$HEADER" ] || [ "$TAG" != "$CONST" ]; then
+            echo "::error::Tag v$TAG doesn't match the plugin header ($HEADER) or VERSION constant ($CONST)."
+            exit 1
+          fi
+
+      - name: Build zip
+        run: |
+          mkdir -p build/gf-source-capture
+          rsync -a --exclude '.git' --exclude '.github' --exclude 'build' --exclude 'docs' --exclude '.DS_Store' ./ build/gf-source-capture/
+          cd build && zip -rq gf-source-capture.zip gf-source-capture
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" build/gf-source-capture.zip --title "$GITHUB_REF_NAME" --generate-notes
